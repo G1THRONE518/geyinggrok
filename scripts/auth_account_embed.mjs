@@ -78,6 +78,7 @@ function acErrorMessage(err) {
   if (code.includes('invalid_stake')) return '单注金额须在 1–' + acCoinCap() + ' 币之间';
   if (code.includes('invalid_parlay')) return '串关至少需要 2 关';
   if (code.includes('Failed to fetch') || code.includes('NetworkError')) return '钱包 API 连接失败，请确认已部署到 Netlify';
+  if (code.includes('wallet_busy')) return '钱包繁忙，请稍后再试';
   return code || '操作失败';
 }
 
@@ -195,6 +196,10 @@ async function acSavePrefs() {
 }
 
 let acPrefsTimer = null;
+function acCancelSavePrefs() {
+  clearTimeout(acPrefsTimer);
+  acPrefsTimer = null;
+}
 function acScheduleSavePrefs() {
   if (!acEnabled() || !state.account.active) return;
   clearTimeout(acPrefsTimer);
@@ -243,6 +248,7 @@ function acApplyBetResponse(data) {
 }
 
 async function acPlaceBet(ticket) {
+  acCancelSavePrefs();
   const data = await acApi('POST', {
     action: 'bet',
     stake: ticket.stake,
@@ -257,6 +263,7 @@ async function acPlaceBet(ticket) {
 }
 
 async function acPlaceParlay(ticket) {
+  acCancelSavePrefs();
   const data = await acApi('POST', {
     action: 'parlay',
     stake: ticket.stake,

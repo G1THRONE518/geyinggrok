@@ -56,6 +56,26 @@ async function saveWallet(store, key, wallet) {
   await store.setJSON(key, wallet);
 }
 
+/** Re-read before write; retry if another request wrote in between (avoids prefs stomping bets). */
+async function mutateWallet(store, key, mutator, maxAttempts = 8) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const wallet = await loadWallet(store, key);
+    const revBefore = wallet.rev || 0;
+    mutator(wallet);
+    const lastTicket = wallet._lastTicket;
+    delete wallet._lastTicket;
+    wallet.rev = revBefore + 1;
+    wallet.updatedAt = new Date().toISOString();
+    await saveWallet(store, key, wallet);
+    const verify = await store.get(key, { type: "json" });
+    if ((verify?.rev || 0) === wallet.rev) {
+      if (lastTicket) wallet._lastTicket = lastTicket;
+      return wallet;
+    }
+  }
+  throw new Error("wallet_write_conflict");
+}
+
 function pruneTimestamps(timestamps) {
   const cutoff = Date.now() - 60_000;
   return (timestamps || []).filter((t) => t > cutoff);
@@ -97,11 +117,11 @@ export default async (request, context) => {
     }
 
     const body = await request.json();
-    const wallet = await loadWallet(store, key);
 
     if (body.action === "prefs") {
-      wallet.prefs = { ...(wallet.prefs || {}), ...(body.prefs || {}) };
-      await saveWallet(store, key, wallet);
+      const wallet = await mutateWallet(store, key, (w) => {
+        w.prefs = { ...(w.prefs || {}), ...(body.prefs || {}) };
+      });
       return jsonResponse({ ok: true, prefs: wallet.prefs });
     }
 
@@ -110,33 +130,33 @@ export default async (request, context) => {
       return jsonResponse({ error: "invalid_stake" }, 400);
     }
 
-    wallet.betTimestamps = pruneTimestamps(wallet.betTimestamps);
-    if (recentBetCount(wallet.betTimestamps) >= RATE_LIMIT) {
-      return jsonResponse({ error: "rate_limited" }, 429);
-    }
-
-    if (wallet.coins < stake) {
-      return jsonResponse({ error: "insufficient_coins", coins: wallet.coins }, 400);
-    }
-
     if (body.action === "bet") {
-      const ticket = {
-        id: wallet.nextId++,
-        ticket_type: body.type,
-        picks: body.picks || {},
-        legs: null,
-        label: body.label || "",
-        description: body.desc || "",
-        stake,
-        odds: Number(body.odds) || 1.01,
-        status: "open",
-        created_at: new Date().toISOString(),
-      };
-      wallet.coins -= stake;
-      wallet.betTimestamps.push(Date.now());
-      wallet.tickets = [ticket, ...(wallet.tickets || [])];
-      await saveWallet(store, key, wallet);
-      return jsonResponse({ coins: wallet.coins, ticket });
+      const wallet = await mutateWallet(store, key, (w) => {
+        w.betTimestamps = pruneTimestamps(w.betTimestamps);
+        if (recentBetCount(w.betTimestamps) >= RATE_LIMIT) {
+          throw Object.assign(new Error("rate_limited"), { code: "rate_limited" });
+        }
+        if (w.coins < stake) {
+          throw Object.assign(new Error("insufficient_coins"), { code: "insufficient_coins", coins: w.coins });
+        }
+        const ticket = {
+          id: w.nextId++,
+          ticket_type: body.type,
+          picks: body.picks || {},
+          legs: null,
+          label: body.label || "",
+          description: body.desc || "",
+          stake,
+          odds: Number(body.odds) || 1.01,
+          status: "open",
+          created_at: new Date().toISOString(),
+        };
+        w.coins -= stake;
+        w.betTimestamps.push(Date.now());
+        w.tickets = [ticket, ...(w.tickets || [])];
+        w._lastTicket = ticket;
+      });
+      return jsonResponse({ coins: wallet.coins, ticket: wallet._lastTicket });
     }
 
     if (body.action === "parlay") {
@@ -144,27 +164,43 @@ export default async (request, context) => {
       if (!Array.isArray(legs) || legs.length < 2) {
         return jsonResponse({ error: "invalid_parlay" }, 400);
       }
-      const ticket = {
-        id: wallet.nextId++,
-        ticket_type: "Z_parlay",
-        picks: {},
-        legs,
-        label: body.label || "",
-        description: body.desc || "",
-        stake,
-        odds: Number(body.odds) || 1.01,
-        status: "open",
-        created_at: new Date().toISOString(),
-      };
-      wallet.coins -= stake;
-      wallet.betTimestamps.push(Date.now());
-      wallet.tickets = [ticket, ...(wallet.tickets || [])];
-      await saveWallet(store, key, wallet);
-      return jsonResponse({ coins: wallet.coins, ticket });
+      const wallet = await mutateWallet(store, key, (w) => {
+        w.betTimestamps = pruneTimestamps(w.betTimestamps);
+        if (recentBetCount(w.betTimestamps) >= RATE_LIMIT) {
+          throw Object.assign(new Error("rate_limited"), { code: "rate_limited" });
+        }
+        if (w.coins < stake) {
+          throw Object.assign(new Error("insufficient_coins"), { code: "insufficient_coins", coins: w.coins });
+        }
+        const ticket = {
+          id: w.nextId++,
+          ticket_type: "Z_parlay",
+          picks: {},
+          legs,
+          label: body.label || "",
+          description: body.desc || "",
+          stake,
+          odds: Number(body.odds) || 1.01,
+          status: "open",
+          created_at: new Date().toISOString(),
+        };
+        w.coins -= stake;
+        w.betTimestamps.push(Date.now());
+        w.tickets = [ticket, ...(w.tickets || [])];
+        w._lastTicket = ticket;
+      });
+      return jsonResponse({ coins: wallet.coins, ticket: wallet._lastTicket });
     }
 
     return jsonResponse({ error: "unknown_action" }, 400);
   } catch (err) {
+    if (err?.code === "rate_limited") return jsonResponse({ error: "rate_limited" }, 429);
+    if (err?.code === "insufficient_coins") {
+      return jsonResponse({ error: "insufficient_coins", coins: err.coins }, 400);
+    }
+    if (String(err?.message || err).includes("wallet_write_conflict")) {
+      return jsonResponse({ error: "wallet_busy", message: "retry" }, 409);
+    }
     return jsonResponse({ error: "server_error", message: String(err?.message || err) }, 500);
   }
 };
