@@ -509,12 +509,25 @@ function ltFullRankCache(group) {
   const rng = ltSeededRng(cacheKey);
   const rankCounts = new Map(rows.map((r) => [r.entry.code, new Array(n).fill(0)]));
   const top2OrderCounts = new Map();
+  const top10FhCounts = new Array(11).fill(0);
+  let top3SameHalfCount = 0;
 
   for (let s = 0; s < samples; s++) {
     const order = ltPlackettDrawTop(weights, n, rng);
     for (let k = 0; k < order.length; k++) {
       const code = rows[order[k]]?.entry?.code;
       if (code) rankCounts.get(code)[k]++;
+    }
+    let fhTop10 = 0;
+    for (let k = 0; k < Math.min(10, order.length); k++) {
+      if (rows[order[k]]?.entry?.half === '上半场') fhTop10++;
+    }
+    top10FhCounts[fhTop10]++;
+    if (order.length >= 3) {
+      const h0 = rows[order[0]]?.entry?.half;
+      const h1 = rows[order[1]]?.entry?.half;
+      const h2 = rows[order[2]]?.entry?.half;
+      if (h0 && h0 === h1 && h1 === h2) top3SameHalfCount++;
     }
     if (order.length >= 2) {
       const first = rows[order[0]]?.entry?.code;
@@ -526,9 +539,53 @@ function ltFullRankCache(group) {
     }
   }
 
-  const cache = { key: cacheKey, rankCounts, top2OrderCounts, samples, n };
+  const cache = { key: cacheKey, rankCounts, top2OrderCounts, top10FhCounts, top3SameHalfCount, samples, n };
   state.lottery.fullRankCache = cache;
   return cache;
+}
+
+function ltKenoHitsCache(group, codes) {
+  ltEnsureState();
+  const normalized = [...codes].sort();
+  const { rows } = ltGroupContext(group);
+  const cacheKey = group + '#keno#' + normalized.join(',') + '#' + ltTopNScoreKey(rows);
+  if (state.lottery.kenoCache?.key === cacheKey) return state.lottery.kenoCache;
+
+  const codeSet = new Set(normalized);
+  const { weights } = ltSoftmaxWeights(rows);
+  const n = rows.length;
+  const samples = n > 35 ? 6000 : 8000;
+  const rng = ltSeededRng(cacheKey);
+  const hitCounts = new Array(6).fill(0);
+
+  for (let s = 0; s < samples; s++) {
+    const order = ltPlackettDrawTop(weights, n, rng);
+    let hits = 0;
+    for (let k = 0; k < Math.min(10, order.length); k++) {
+      const code = rows[order[k]]?.entry?.code;
+      if (codeSet.has(code)) hits++;
+    }
+    hitCounts[Math.min(5, hits)]++;
+  }
+
+  const cache = { key: cacheKey, hitCounts, samples };
+  state.lottery.kenoCache = cache;
+  return cache;
+}
+
+function ltProbKenoHits(group, codes, target) {
+  const list = (codes || []).filter(Boolean);
+  if (list.length !== 5 || new Set(list).size !== 5) return null;
+  const t = Number(target);
+  if (!Number.isFinite(t) || t < 0 || t > 5) return null;
+  const { hitCounts, samples } = ltKenoHitsCache(group, list);
+  return Math.max(0.0005, Math.min(0.99, (hitCounts[t] || 0) / samples));
+}
+
+function ltProbTop3SameHalf(group, yes) {
+  const { top3SameHalfCount, samples } = ltFullRankCache(group);
+  const p = top3SameHalfCount / samples;
+  return Math.max(0.0005, Math.min(0.99, yes ? p : 1 - p));
 }
 
 function ltTopNProbMap(group, n) {
@@ -610,27 +667,23 @@ function ltProbChampionHalf(group, half) {
     .reduce((s, r) => s + (r.advanceProb ?? 0) / 100, 0);
 }
 
-function ltTop10HalfLine(group) {
-  const rows = ltRanked(group);
-  const fhTotal = rows.filter((r) => r.entry.half === '上半场').length;
-  const total = rows.length || 1;
-  return Math.max(1, Math.round((10 * fhTotal) / total));
+function ltProbTop10HalfSide(group, side) {
+  const { top10FhCounts, samples } = ltFullRankCache(group);
+  let hits = 0;
+  if (side === 'over') {
+    for (let k = 6; k <= 10; k++) hits += top10FhCounts[k] || 0;
+  } else if (side === 'push') {
+    hits = top10FhCounts[5] || 0;
+  } else {
+    for (let k = 0; k <= 4; k++) hits += top10FhCounts[k] || 0;
+  }
+  return Math.max(0.0005, Math.min(0.99, hits / samples));
 }
 
-function ltProbTop10HalfOver(group, side) {
-  const { rows, avgStep, sizeBoost } = ltGroupContext(group);
-  const line = ltTop10HalfLine(group);
-  const top = rows.slice(0, 10);
-  const fh = top.filter((r) => r.entry.half === '上半场').length;
-  const bubble = rows.slice(Math.max(0, line - 3), Math.min(rows.length, line + 8));
-  const fhNearLine = bubble.filter((r) => r.entry.half === '上半场').length;
-  const margin = fh - line;
-  let pOver = 0.5 + margin * 0.14 + (fhNearLine - bubble.length / 2) * 0.04;
-  const volatility = Math.min(0.28, 0.1 / avgStep);
-  pOver = pOver * (1 - volatility) + 0.5 * volatility;
-  if (rows.length <= 30) pOver = pOver * 0.9 + 0.05;
-  pOver = Math.max(0.07, Math.min(0.93, pOver * (1 + (sizeBoost - 1) * 0.15)));
-  return side === 'over' ? pOver : 1 - pOver;
+function ltTop10HalfSideLabel(side) {
+  if (side === 'over') return '大 6–10';
+  if (side === 'push') return '平 5';
+  return '小 0–4';
 }
 
 function ltProbHalfPeak(group, half) {
@@ -721,10 +774,15 @@ function ltQuoteTicket(type, picks) {
   if (type === 'B_exact_rank') return ltBookOdds(ltProbExactRank(p.group, p.code, p.rank));
   if (type === 'B_rank_band') return ltBookOdds(ltProbRankBand(p.group, p.code, p.lo, p.hi));
   if (type === 'B_last') return ltBookOdds(ltProbLast(p.group, p.code));
+  if (type === 'B_keno_top10') {
+    const prob = ltProbKenoHits(p.group, p.codes, p.hits);
+    return prob == null ? null : ltBookOdds(prob);
+  }
   if (type === 'D_champion_half') return ltBookOdds(ltProbChampionHalf(p.group, p.half));
-  if (type === 'D_top10_half_count') return ltBookOdds(ltProbTop10HalfOver(p.group || '中文组', p.side));
+  if (type === 'D_top10_half_count') return ltBookOdds(ltProbTop10HalfSide(p.group || '中文组', p.side));
   if (type === 'D_cross_half_peak') return ltBookOdds(ltProbHalfPeak(p.group || '中文组', p.half));
   if (type === 'D_avg_rank_half') return ltBookOdds(ltProbAvgRankHalf(p.group || '中文组', p.half));
+  if (type === 'D_top3_same_half') return ltBookOdds(ltProbTop3SameHalf(p.group || '中文组', p.yes === true || p.yes === 'yes'));
   if (type === 'H_dark_horse') return ltBookOdds(ltProbDarkHorse(p.group, p.code));
   if (type === 'H_upset_victim' || type === 'H_biggest_upset') return ltBookOdds(ltProbUpsetVictim(p.group, p.code));
   if (type === 'H_tail_digit') return ltBookOdds(ltProbTailDigit(p.digit));
@@ -790,9 +848,10 @@ function ltFillBinarySelect(selectId, options) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = options.map((opt) => (
-    '<option value="' + opt.value + '">' + escapeHtml(ltFmtPct(opt.prob) + ' · ' + ltDisplayText(opt.label)) + '</option>'
-  )).join('');
+  sel.innerHTML = options.map((opt) => {
+    const prefix = opt.prob == null ? '— · ' : ltFmtPct(opt.prob) + ' · ';
+    return '<option value="' + opt.value + '">' + escapeHtml(prefix + ltDisplayText(opt.label)) + '</option>';
+  }).join('');
   if (cur) sel.value = cur;
 }
 
@@ -990,6 +1049,19 @@ function ltSettleTicket(ticket) {
     const win = last?.entry?.code === p.code;
     return { status: win ? 'win' : 'lose', note: '垫底：' + (last?.entry?.code || '—') };
   }
+  if (t === 'B_keno_top10') {
+    const group = p.group || '中文组';
+    const rows = ltSnapRows(snap, group);
+    const top10 = new Set(rows.slice(0, 10).map((r) => r.entry.code));
+    const codes = p.codes || [];
+    const actual = codes.filter((c) => top10.has(c)).length;
+    const target = Number(p.hits);
+    const win = actual === target;
+    return {
+      status: win ? 'win' : 'lose',
+      note: group + ' · 中 ' + actual + '/5（猜 ' + target + '）· ' + codes.join(' '),
+    };
+  }
 
   if (t === 'D_champion_half') {
     const champ = p.group === '外文组' ? snap.championYf : snap.championZh;
@@ -999,11 +1071,10 @@ function ltSettleTicket(ticket) {
   }
   if (t === 'D_top10_half_count') {
     const group = p.group || '中文组';
-    const line = ltTop10HalfLine(group);
     const rows = ltSnapRows(snap, group).slice(0, 10);
     const fh = rows.filter((r) => r.entry.half === '上半场').length;
-    const win = p.side === 'over' ? fh >= line : fh < line;
-    return { status: win ? 'win' : 'lose', note: group + ' Top10 上半场 ' + fh + ' 席（线 ' + line + '）' };
+    const win = p.side === 'over' ? fh >= 6 : p.side === 'push' ? fh === 5 : fh <= 4;
+    return { status: win ? 'win' : 'lose', note: group + ' Top10 上半场 ' + fh + ' 席（' + ltTop10HalfSideLabel(p.side) + '）' };
   }
   if (t === 'D_cross_half_peak') {
     const group = p.group || '中文组';
@@ -1023,6 +1094,19 @@ function ltSettleTicket(ticket) {
     const winner = avg(fh) < avg(sh) ? '上半场' : '下半场';
     const win = winner === p.half;
     return { status: win ? 'win' : 'lose', note: group + ' 平均名次 上 ' + avg(fh).toFixed(1) + ' vs 下 ' + avg(sh).toFixed(1) + ' → ' + winner };
+  }
+  if (t === 'D_top3_same_half') {
+    const group = p.group || '中文组';
+    const top3 = ltSnapRows(snap, group).slice(0, 3);
+    const halves = top3.map((r) => r.entry.half);
+    const same = halves.length === 3 && halves[0] && halves.every((h) => h === halves[0]);
+    const wantYes = p.yes === true || p.yes === 'yes';
+    const win = wantYes === same;
+    const codes = top3.map((r) => r.entry.code).join('/');
+    return {
+      status: win ? 'win' : 'lose',
+      note: group + ' 冠亚季 ' + (same ? '均' + halves[0] : '半场混合') + '（' + codes + '）',
+    };
   }
 
   if (t === 'H_dark_horse') {
@@ -1185,8 +1269,14 @@ function ltMarketsA() {
 
 function ltMarketsB() {
   const groupSel = '<select id="ltB_group"><option value="中文组">中文组</option><option value="外文组">外文组</option></select>';
+  const kenoGroupSel = '<select id="ltB_keno_group"><option value="中文组">中文组</option><option value="外文组">外文组</option></select>';
+  const kenoPick = (n) => '<select id="ltB_k' + n + '"><option value="">— 选择 —</option></select>';
   const codeSel = '<select id="ltB_code"><option value="">— 选择 —</option></select>';
   return ''
+    + '<div class="lt-card"><h4>中几算几</h4><p>选 <strong>5 首不重复</strong>，猜其中<strong>几首</strong>最终进入组内 Top10（0–5，Keno 复式）</p><div class="lt-form">'
+    + kenoGroupSel + kenoPick(1) + kenoPick(2) + kenoPick(3) + kenoPick(4) + kenoPick(5)
+    + '<select id="ltB_keno_hits"><option value="0">中 0 首</option><option value="1">中 1 首</option><option value="2">中 2 首</option><option value="3">中 3 首</option><option value="4">中 4 首</option><option value="5">中 5 首</option></select>'
+    + '<span id="ltOdds_B_keno" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_B_keno">下注</button></div></div>'
     + '<div class="lt-card"><h4>进前三 / 前五 / 前十</h4><p>逐首估算：Plackett-Luce 抽样 + 与第 N 名<strong>分差</strong>（领先越多，进榜概率越高）</p><div class="lt-form">' + groupSel
     + '<select id="ltB_topn"><option value="3">Top 3</option><option value="5">Top 5</option><option value="10">Top 10</option></select>'
     + '<span id="ltB_code_wrap">' + codeSel + '</span><span id="ltOdds_B_top" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_B_top">下注</button></div></div>'
@@ -1208,12 +1298,15 @@ function ltMarketsD() {
   const halfSel = '<select id="ltD_half"><option value="上半场">上半场</option><option value="下半场">下半场</option></select>';
   return ''
     + '<div class="lt-card"><h4>冠军来自哪半场</h4><p>猜该组冠军是上半场还是下半场作品</p><div class="lt-form"><select id="ltD_ch_group"><option value="中文组">中文组</option><option value="外文组">外文组</option></select>' + halfSel + '<span id="ltOdds_D_champ_half" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_D_champ_half">下注</button></div></div>'
-    + '<div class="lt-card"><h4>Top10 上半场占优</h4><p>组内前十里上半场席位数是否达到盘口线（随组别自动调整）</p><div class="lt-form">' + groupSel.replace('ltD_group', 'ltD_ou_group')
-    + '<select id="ltD_ou"><option value="over">大 · 达线</option><option value="under">小 · 未达线</option></select>'
-    + '<span id="ltD_ou_line" style="font-size:11px;color:#9f8f95"></span>'
+    + '<div class="lt-card"><h4>Top10 上半场占优</h4><p>组内前十里上半场席位数：<strong>大 6–10</strong> / <strong>平 5</strong> / <strong>小 0–4</strong></p><div class="lt-form">' + groupSel.replace('ltD_group', 'ltD_ou_group')
+    + '<select id="ltD_ou"><option value="over">大 · 6–10 席</option><option value="push">平 · 5 席</option><option value="under">小 · 0–4 席</option></select>'
+    + '<span id="ltD_ou_line" style="font-size:11px;color:#9f8f95">大 6–10 · 平 5 · 小 0–4</span>'
     + '<span id="ltOdds_D_ou" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_D_ou">下注</button></div></div>'
     + '<div class="lt-card"><h4>跨半场最高名次</h4><p>组内上半场最高 vs 下半场最高，谁排名更靠前</p><div class="lt-form">' + groupSel.replace('ltD_group', 'ltD_peak_group') + halfSel.replace('ltD_half', 'ltD_peak') + '<span id="ltOdds_D_peak" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_D_peak">下注</button></div></div>'
-    + '<div class="lt-card"><h4>半场平均名次</h4><p>组内各半场平均名次，猜哪边更靠前（更小）</p><div class="lt-form">' + groupSel.replace('ltD_group', 'ltD_avg_group') + halfSel.replace('ltD_half', 'ltD_avg') + '<span id="ltOdds_D_avg" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_D_avg">下注</button></div></div>';
+    + '<div class="lt-card"><h4>半场平均名次</h4><p>组内各半场平均名次，猜哪边更靠前（更小）</p><div class="lt-form">' + groupSel.replace('ltD_group', 'ltD_avg_group') + halfSel.replace('ltD_half', 'ltD_avg') + '<span id="ltOdds_D_avg" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_D_avg">下注</button></div></div>'
+    + '<div class="lt-card"><h4>冠亚季同半场</h4><p>组内冠亚季<strong>三席均来自同一半场</strong>（全上半场或全下半场）</p><div class="lt-form"><select id="ltD_top3_group"><option value="中文组">中文组</option><option value="外文组">外文组</option></select>'
+    + '<select id="ltD_top3_same"><option value="yes">是 · 三席同半场</option><option value="no">否 · 半场混合</option></select>'
+    + '<span id="ltOdds_D_top3_same" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_D_top3_same">下注</button></div></div>';
 }
 
 function ltMarketsH() {
@@ -1254,6 +1347,39 @@ function ltFillBLastSelect(selectId, group) {
   ltFillEntrySelect(selectId, group, (row) => ltProbLast(group, row.entry.code));
 }
 
+const ltKenoSelectIds = ['ltB_k1', 'ltB_k2', 'ltB_k3', 'ltB_k4', 'ltB_k5'];
+
+function ltReadKenoCodes() {
+  const codes = ltKenoSelectIds.map((id) => document.getElementById(id)?.value).filter(Boolean);
+  if (codes.length !== 5) throw new Error('请选满 5 首作品');
+  if (new Set(codes).size !== 5) throw new Error('5 首须互不相同');
+  return codes;
+}
+
+function ltKenoCodesFromUi() {
+  const codes = ltKenoSelectIds.map((id) => document.getElementById(id)?.value).filter(Boolean);
+  return codes.length === 5 && new Set(codes).size === 5 ? codes : null;
+}
+
+function ltFillKenoEntrySelect(selectId, group) {
+  ltFillEntrySelect(selectId, group, (row) => ltProbTopN(group, row.entry.code, 10));
+}
+
+function ltFillKenoHitsSelect(group, codes) {
+  ltFillBinarySelect('ltB_keno_hits', Array.from({ length: 6 }, (_, k) => ({
+    value: String(k),
+    label: '中 ' + k + ' 首',
+    prob: codes ? ltProbKenoHits(group, codes, k) : null,
+  })));
+}
+
+function ltFillTop3SameHalfSelect(group) {
+  ltFillBinarySelect('ltD_top3_same', [
+    { value: 'yes', label: '是 · 三席同半场', prob: ltProbTop3SameHalf(group, true) },
+    { value: 'no', label: '否 · 半场混合', prob: ltProbTop3SameHalf(group, false) },
+  ]);
+}
+
 function ltFillTailDigitSelect() {
   ltFillBinarySelect('ltH_digit', Array.from({ length: 10 }, (_, d) => ({
     value: String(d),
@@ -1272,8 +1398,9 @@ function ltFillDHalfSelect(selectId, group, probFn) {
 
 function ltFillDOuSelect(group) {
   ltFillBinarySelect('ltD_ou', [
-    { value: 'over', label: '大 · 达线', prob: ltProbTop10HalfOver(group, 'over') },
-    { value: 'under', label: '小 · 未达线', prob: ltProbTop10HalfOver(group, 'under') },
+    { value: 'over', label: '大 · 6–10 席', prob: ltProbTop10HalfSide(group, 'over') },
+    { value: 'push', label: '平 · 5 席', prob: ltProbTop10HalfSide(group, 'push') },
+    { value: 'under', label: '小 · 0–4 席', prob: ltProbTop10HalfSide(group, 'under') },
   ]);
 }
 
@@ -1303,6 +1430,11 @@ function ltWireMarketA() {
 }
 
 function ltWireMarketB() {
+  const syncKeno = () => {
+    const group = document.getElementById('ltB_keno_group')?.value || '中文组';
+    ltKenoSelectIds.forEach((id) => ltFillKenoEntrySelect(id, group));
+    ltFillKenoHitsSelect(group, ltKenoCodesFromUi());
+  };
   const sync = () => {
     ltFillBTopSelect('ltB_code', document.getElementById('ltB_group')?.value || '中文组');
     ltFillBExactSelect('ltB_code_ex', document.getElementById('ltB_group_ex')?.value || '中文组');
@@ -1311,13 +1443,16 @@ function ltWireMarketB() {
     const max = (document.getElementById('ltB_group_ex')?.value === '外文组') ? 25 : 60;
     document.getElementById('ltB_rank')?.setAttribute('max', String(max));
   };
+  document.getElementById('ltB_keno_group')?.addEventListener('change', syncKeno);
+  ltKenoSelectIds.forEach((id) => document.getElementById(id)?.addEventListener('change', syncKeno));
   ['ltB_group', 'ltB_group_ex', 'ltB_group_band', 'ltB_group_last', 'ltB_topn', 'ltB_rank', 'ltB_lo', 'ltB_hi'].forEach((id) => {
     const el = document.getElementById(id);
     el?.addEventListener('change', sync);
     el?.addEventListener('input', sync);
   });
+  syncKeno();
   sync();
-  return sync;
+  return () => { syncKeno(); sync(); };
 }
 
 function ltWireMarketD() {
@@ -1330,8 +1465,9 @@ function ltWireMarketD() {
     ltFillDOuSelect(dOuGroup);
     ltFillDHalfSelect('ltD_peak', dPeakGroup, ltProbHalfPeak);
     ltFillDHalfSelect('ltD_avg', dAvgGroup, ltProbAvgRankHalf);
+    ltFillTop3SameHalfSelect(document.getElementById('ltD_top3_group')?.value || '中文组');
   };
-  ['ltD_ch_group', 'ltD_ou_group', 'ltD_peak_group', 'ltD_avg_group'].forEach((id) => {
+  ['ltD_ch_group', 'ltD_ou_group', 'ltD_peak_group', 'ltD_avg_group', 'ltD_top3_group'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', sync);
   });
   sync();
@@ -1371,6 +1507,17 @@ function ltWireMarketAdds() {
     if (a === b) throw new Error('须选两首不同作品');
     return { type: 'A_top2_any', picks: { group, a, b }, label: '冠亚军任序', desc: group + ' · ' + a + ' · ' + b };
   });
+  ltBindAdd('ltAdd_B_keno', () => {
+    const group = document.getElementById('ltB_keno_group')?.value || '中文组';
+    const codes = ltReadKenoCodes();
+    const hits = Number(document.getElementById('ltB_keno_hits')?.value ?? 0);
+    return {
+      type: 'B_keno_top10',
+      picks: { group, codes, hits },
+      label: '中几算几',
+      desc: group + ' · 中 ' + hits + ' · ' + codes.join(' '),
+    };
+  });
   ltBindAdd('ltAdd_B_top', () => {
     const group = document.getElementById('ltB_group')?.value || '中文组';
     const n = Number(document.getElementById('ltB_topn')?.value || 3);
@@ -1404,8 +1551,7 @@ function ltWireMarketAdds() {
   ltBindAdd('ltAdd_D_ou', () => {
     const group = document.getElementById('ltD_ou_group')?.value || '中文组';
     const side = document.getElementById('ltD_ou')?.value || 'over';
-    const line = ltTop10HalfLine(group);
-    return { type: 'D_top10_half_count', picks: { group, side }, label: 'Top10 上半场席', desc: group + ' · ' + (side === 'over' ? '大 ≥' + line : '小 <' + line) };
+    return { type: 'D_top10_half_count', picks: { group, side }, label: 'Top10 上半场席', desc: group + ' · ' + ltTop10HalfSideLabel(side) };
   });
   ltBindAdd('ltAdd_D_peak', () => {
     const group = document.getElementById('ltD_peak_group')?.value || '中文组';
@@ -1416,6 +1562,16 @@ function ltWireMarketAdds() {
     const group = document.getElementById('ltD_avg_group')?.value || '中文组';
     const half = document.getElementById('ltD_avg')?.value || '上半场';
     return { type: 'D_avg_rank_half', picks: { group, half }, label: '半场平均名次', desc: group + ' · ' + half + ' 更靠前' };
+  });
+  ltBindAdd('ltAdd_D_top3_same', () => {
+    const group = document.getElementById('ltD_top3_group')?.value || '中文组';
+    const yes = document.getElementById('ltD_top3_same')?.value === 'yes';
+    return {
+      type: 'D_top3_same_half',
+      picks: { group, yes },
+      label: '冠亚季同半场',
+      desc: group + ' · ' + (yes ? '三席同半场' : '半场混合'),
+    };
   });
   ltBindAdd('ltAdd_H_dark', () => {
     const group = document.getElementById('ltH_group')?.value || '中文组';
@@ -1499,6 +1655,14 @@ function ltWireLiveOddsA() {
 }
 
 function ltWireLiveOddsB() {
+  const quoteKeno = () => {
+    const group = document.getElementById('ltB_keno_group')?.value || '中文组';
+    const codes = ltKenoCodesFromUi();
+    const hits = Number(document.getElementById('ltB_keno_hits')?.value ?? 0);
+    if (!codes) return null;
+    const prob = ltProbKenoHits(group, codes, hits);
+    return prob == null ? null : ltBookOdds(prob);
+  };
   const quoteTop = () => {
     const group = document.getElementById('ltB_group')?.value || '中文组';
     const code = document.getElementById('ltB_code')?.value;
@@ -1527,11 +1691,15 @@ function ltWireLiveOddsB() {
     if (!code) return null;
     return ltBookOdds(ltProbLast(group, code));
   };
+  const syncKeno = ltWireLiveOdds(['ltOdds_B_keno'], quoteKeno);
   const syncTop = ltWireLiveOdds(['ltOdds_B_top'], quoteTop);
   const syncExact = ltWireLiveOdds(['ltOdds_B_exact'], quoteExact);
   const syncBand = ltWireLiveOdds(['ltOdds_B_band'], quoteBand);
   const syncLast = ltWireLiveOdds(['ltOdds_B_last'], quoteLast);
-  const syncAll = () => { syncTop(); syncExact(); syncBand(); syncLast(); };
+  const syncAll = () => { syncKeno(); syncTop(); syncExact(); syncBand(); syncLast(); };
+  document.getElementById('ltB_keno_group')?.addEventListener('change', syncAll);
+  ltKenoSelectIds.forEach((id) => document.getElementById(id)?.addEventListener('change', syncAll));
+  document.getElementById('ltB_keno_hits')?.addEventListener('change', syncAll);
   ['ltB_group', 'ltB_topn', 'ltB_code', 'ltB_group_ex', 'ltB_code_ex', 'ltB_rank', 'ltB_group_band', 'ltB_code_band', 'ltB_lo', 'ltB_hi', 'ltB_group_last', 'ltB_code_last'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', syncAll);
     document.getElementById(id)?.addEventListener('input', syncAll);
@@ -1548,10 +1716,7 @@ function ltWireLiveOddsD() {
   const syncOu = ltWireLiveOdds(['ltOdds_D_ou'], () => {
     const group = document.getElementById('ltD_ou_group')?.value || '中文组';
     const side = document.getElementById('ltD_ou')?.value || 'over';
-    const line = ltTop10HalfLine(group);
-    const lineEl = document.getElementById('ltD_ou_line');
-    if (lineEl) lineEl.textContent = '线 ' + line + ' 席';
-    return ltBookOdds(ltProbTop10HalfOver(group, side));
+    return ltBookOdds(ltProbTop10HalfSide(group, side));
   });
   const syncPeak = ltWireLiveOdds(['ltOdds_D_peak'], () => {
     const group = document.getElementById('ltD_peak_group')?.value || '中文组';
@@ -1563,8 +1728,13 @@ function ltWireLiveOddsD() {
     const half = document.getElementById('ltD_avg')?.value || '上半场';
     return ltBookOdds(ltProbAvgRankHalf(group, half));
   });
-  const syncAll = () => { syncChamp(); syncOu(); syncPeak(); syncAvg(); };
-  ['ltD_ch_group', 'ltD_half', 'ltD_ou_group', 'ltD_ou', 'ltD_peak_group', 'ltD_peak', 'ltD_avg_group', 'ltD_avg'].forEach((id) => {
+  const syncTop3Same = ltWireLiveOdds(['ltOdds_D_top3_same'], () => {
+    const group = document.getElementById('ltD_top3_group')?.value || '中文组';
+    const yes = document.getElementById('ltD_top3_same')?.value === 'yes';
+    return ltBookOdds(ltProbTop3SameHalf(group, yes));
+  });
+  const syncAll = () => { syncChamp(); syncOu(); syncPeak(); syncAvg(); syncTop3Same(); };
+  ['ltD_ch_group', 'ltD_half', 'ltD_ou_group', 'ltD_ou', 'ltD_peak_group', 'ltD_peak', 'ltD_avg_group', 'ltD_avg', 'ltD_top3_group', 'ltD_top3_same'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', syncAll);
   });
   return syncAll;
