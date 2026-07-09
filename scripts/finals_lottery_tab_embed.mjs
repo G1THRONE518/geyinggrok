@@ -198,13 +198,15 @@ function ltParlayOdds(legs) {
 }
 
 function ltBuildLeg(ticket) {
-  return {
+  const leg = {
     type: ticket.type,
     picks: ticket.picks || {},
     label: ticket.label || '',
     desc: ticket.desc || '',
     odds: ltQuoteTicket(ticket.type, ticket.picks),
   };
+  leg.desc = ltLegSummary(leg);
+  return leg;
 }
 
 function ltCoinCap() {
@@ -276,6 +278,40 @@ function ltEntryOptionLabel(prob, row) {
 
 function ltDisplayText(text) {
   return (typeof maskLeakText === 'function') ? maskLeakText(text) : String(text ?? '');
+}
+
+function ltLegSummary(leg) {
+  const type = leg?.type;
+  const p = leg?.picks || {};
+  const g = p.group || '中文组';
+  if (type === 'A_champion_zh') return '中文组冠军 · ' + (p.code || '—');
+  if (type === 'A_champion_yf') return '外文组冠军 · ' + (p.code || '—');
+  if (type === 'A_double_champion') return '双冠 · 中文 ' + (p.zh || '—') + ' + 外文 ' + (p.yf || '—');
+  if (type === 'A_top2_order') return g + ' · 冠亚直选 #1 ' + (p.first || '—') + ' #2 ' + (p.second || '—');
+  if (type === 'A_top2_any') return g + ' · 冠亚任序 · ' + (p.a || '—') + ' · ' + (p.b || '—');
+  if (type === 'B_top3' || type === 'B_top5' || type === 'B_top10') {
+    const n = type === 'B_top3' ? 3 : type === 'B_top5' ? 5 : 10;
+    return g + ' · Top ' + n + ' · ' + (p.code || '—');
+  }
+  if (type === 'B_exact_rank') return g + ' · ' + (p.code || '—') + ' · 精确名次 #' + (p.rank ?? '—');
+  if (type === 'B_rank_band') return g + ' · ' + (p.code || '—') + ' · 名次 #' + (p.lo ?? '—') + '–#' + (p.hi ?? '—');
+  if (type === 'B_last') return g + ' · ' + (p.code || '—') + ' · 组内垫底';
+  if (type === 'B_keno_top10') {
+    const codes = (p.codes || []).join(' ');
+    return g + ' · 中几算几 · 猜中 ' + (p.hits ?? '—') + '/5' + (codes ? ' · ' + codes : '');
+  }
+  if (type === 'D_champion_half') return g + ' · 冠军来自 · ' + (p.half || '—');
+  if (type === 'D_top10_half_count') return g + ' · Top10 上半场席 · ' + ltTop10HalfSideLabel(p.side);
+  if (type === 'D_cross_half_peak') return g + ' · 跨半场最高 · ' + (p.half || '—');
+  if (type === 'D_avg_rank_half') return g + ' · 半场均名次 · ' + (p.half || '—') + ' 更靠前';
+  if (type === 'D_top3_same_half') return g + ' · 冠亚季同半场 · ' + (p.yes === true || p.yes === 'yes' ? '是' : '否');
+  if (type === 'H_dark_horse') return g + ' · ' + (p.code || '—') + ' · 黑马杀出重围 Top10';
+  if (type === 'H_upset_victim' || type === 'H_biggest_upset') return g + ' · ' + (p.code || '—') + ' · 爆冷跌出 Top10';
+  if (type === 'H_tail_digit') return g + ' · 冠军尾数 · ' + (p.digit ?? '—');
+  const label = leg?.label || '';
+  const desc = leg?.desc || '';
+  if (label && desc && desc.indexOf(label) < 0) return label + ' · ' + desc;
+  return desc || label || '—';
 }
 
 function ltBookOdds(prob) {
@@ -957,7 +993,7 @@ async function ltConfirmParlay() {
     type: 'Z_parlay',
     legs: legs.map((leg) => ({ ...leg })),
     label: '累积串关 ×' + legs.length,
-    desc: legs.map((leg, i) => (i + 1) + '.' + leg.desc).join(' / '),
+    desc: legs.map((leg, i) => (i + 1) + '.' + ltLegSummary(leg)).join(' / '),
     stake,
     odds,
   };
@@ -1163,7 +1199,7 @@ function ltRenderParlay() {
   }
   legsEl.innerHTML = legs.map((leg, i) => (
     '<div class="lt-parlay-leg"><span class="n">' + (i + 1) + '</span>'
-    + '<span>' + escapeHtml(ltDisplayText(leg.label)) + ' · ' + escapeHtml(ltDisplayText(leg.desc)) + '</span>'
+    + '<span>' + escapeHtml(ltDisplayText(ltLegSummary(leg))) + '</span>'
     + ltOddsHtml(leg.odds)
     + '<button type="button" class="lt-btn lt-parlay-rm" data-leg-idx="' + i + '">移除</button></div>'
   )).join('');
@@ -1218,7 +1254,7 @@ function ltRenderSlip() {
     if (ticket.type === 'Z_parlay' && ticket.legs?.length) {
       legHtml = ticket.legs.map((leg, i) => (
         '<div class="lt-parlay-leg"><span class="n">' + (i + 1) + '</span>'
-        + escapeHtml(ltDisplayText(leg.desc || leg.label)) + ' ' + ltOddsHtml(leg.odds) + '</div>'
+        + escapeHtml(ltDisplayText(ltLegSummary(leg))) + ' ' + ltOddsHtml(leg.odds) + '</div>'
       )).join('');
     }
     return '<div class="lt-ticket' + parlayCls + '"><div class="k">' + escapeHtml(ltDisplayText(ticket.label)) + ' ' + ltOddsHtml(odds) + '</div>'
@@ -1523,7 +1559,7 @@ function ltWireMarketAdds() {
     const n = Number(document.getElementById('ltB_topn')?.value || 3);
     const code = ltReadSelect('ltB_code');
     const type = n === 3 ? 'B_top3' : n === 5 ? 'B_top5' : 'B_top10';
-    return { type, picks: { group, code }, label: '进前' + n, desc: group + ' · ' + code };
+    return { type, picks: { group, code }, label: '进前' + n, desc: group + ' · Top ' + n + ' · ' + code };
   });
   ltBindAdd('ltAdd_B_exact', () => {
     const group = document.getElementById('ltB_group_ex')?.value || '中文组';
