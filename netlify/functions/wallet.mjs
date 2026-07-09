@@ -136,7 +136,7 @@ export default async (request, context) => {
       wallet.betTimestamps.push(Date.now());
       wallet.tickets = [ticket, ...(wallet.tickets || [])];
       await saveWallet(store, key, wallet);
-      return jsonResponse({ coins: wallet.coins, ticket_id: ticket.id });
+      return jsonResponse({ coins: wallet.coins, ticket });
     }
 
     if (body.action === "parlay") {
@@ -160,7 +160,7 @@ export default async (request, context) => {
       wallet.betTimestamps.push(Date.now());
       wallet.tickets = [ticket, ...(wallet.tickets || [])];
       await saveWallet(store, key, wallet);
-      return jsonResponse({ coins: wallet.coins, ticket_id: ticket.id });
+      return jsonResponse({ coins: wallet.coins, ticket });
     }
 
     return jsonResponse({ error: "unknown_action" }, 400);

@@ -231,6 +231,17 @@ async function acRequireAuth() {
   return true;
 }
 
+function acApplyBetResponse(data) {
+  if (data.coins != null) acSetBalance(data.coins);
+  if (!data.ticket) return;
+  ltEnsureState();
+  const ticket = acRowToTicket(data.ticket);
+  state.lottery.tickets.unshift(ticket);
+  state.lottery.nextId = Math.max(state.lottery.nextId || 1, (Number(ticket.id) || 0) + 1);
+  ltRenderSlip?.();
+  ltRenderJackpot?.();
+}
+
 async function acPlaceBet(ticket) {
   const data = await acApi('POST', {
     action: 'bet',
@@ -241,8 +252,7 @@ async function acPlaceBet(ticket) {
     desc: ticket.desc || '',
     odds: ticket.odds,
   });
-  if (data.coins != null) acSetBalance(data.coins);
-  await acLoadLotteryFromServer();
+  acApplyBetResponse(data);
   return data;
 }
 
@@ -255,8 +265,7 @@ async function acPlaceParlay(ticket) {
     desc: ticket.desc || '',
     odds: ticket.odds,
   });
-  if (data.coins != null) acSetBalance(data.coins);
-  await acLoadLotteryFromServer();
+  acApplyBetResponse(data);
   return data;
 }
 

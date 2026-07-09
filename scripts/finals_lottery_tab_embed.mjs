@@ -93,6 +93,17 @@ export function lotteryTabCss() {
   }
   .lt-jackpot-sub { font-size: 11px; color: #fecdd3; line-height: 1.5; opacity: 0.92; }
   .lt-jackpot-glow { color: #fbbf24; }
+  .lt-confirm-bar {
+    margin-bottom: 12px; padding: 12px 14px; border-radius: 12px;
+    border: 1px solid rgba(251, 191, 36, 0.45); background: rgba(120, 53, 15, 0.28);
+    font-size: 12px; color: #fde68a; line-height: 1.5;
+  }
+  .lt-confirm-bar .lt-confirm-title { font-weight: 800; color: #fffbeb; margin-bottom: 6px; }
+  .lt-confirm-bar .lt-confirm-meta { font-size: 11px; color: #fcd34d; margin-bottom: 10px; }
+  .lt-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .lt-confirm-actions .lt-btn.danger {
+    border-color: #7f1d1d; background: rgba(69, 10, 10, 0.85); color: #fecaca;
+  }
   `;
 }
 
@@ -120,6 +131,14 @@ export function lotteryTabHtml() {
               <button type="button" class="lt-btn" id="ltClearSlip">刷新注单</button>
               <button type="button" class="lt-btn primary" id="ltRefreshDraw">刷新</button>
               <label class="lt-stake-wrap">单注金额 <input type="number" id="ltStake" min="1" max="100" value="10" step="1" /> 币 <span id="ltWalletCap" class="lt-wallet-cap" style="font-size:10px;color:#9f8f95">余额 ◈— / 100</span></label>
+            </div>
+            <div id="ltPendingConfirm" class="lt-confirm-bar" style="display:none">
+              <div class="lt-confirm-title">待确认注单</div>
+              <div class="lt-confirm-meta" id="ltPendingMeta"></div>
+              <div class="lt-confirm-actions">
+                <button type="button" class="lt-btn primary" id="ltPendingConfirmBtn">确认下注</button>
+                <button type="button" class="lt-btn danger" id="ltPendingCancelBtn">取消</button>
+              </div>
             </div>
             <div id="ltParlay" class="lt-parlay" style="display:none">
               <h4>串关草稿 · 至少 2 关</h4>
@@ -155,12 +174,17 @@ function ltFmtCoin(amount) {
 
 function ltEnsureState() {
   if (!state.lottery) {
-    state.lottery = { activeCategory: 'A', tickets: [], nextId: 1, defaultStake: 10, betMode: 'single', parlayLegs: [] };
+    state.lottery = {
+      activeCategory: 'A', tickets: [], nextId: 1, defaultStake: 10, betMode: 'single',
+      parlayLegs: [], pendingBet: null, placingBet: false,
+    };
   }
   if (!state.lottery.parlayLegs) state.lottery.parlayLegs = [];
   if (!state.lottery.betMode) state.lottery.betMode = 'single';
   if (!state.lottery.topNCache) state.lottery.topNCache = null;
   if (!state.lottery.fullRankCache) state.lottery.fullRankCache = null;
+  if (!('pendingBet' in state.lottery)) state.lottery.pendingBet = null;
+  if (!('placingBet' in state.lottery)) state.lottery.placingBet = false;
 }
 
 function ltIsCumulative() {
@@ -772,13 +796,72 @@ function ltFillBinarySelect(selectId, options) {
   if (cur) sel.value = cur;
 }
 
+function ltClearPendingBet() {
+  ltEnsureState();
+  state.lottery.pendingBet = null;
+  ltRenderPendingConfirm();
+}
+
+function ltRenderPendingConfirm() {
+  ltEnsureState();
+  const bar = document.getElementById('ltPendingConfirm');
+  const meta = document.getElementById('ltPendingMeta');
+  const confirmBtn = document.getElementById('ltPendingConfirmBtn');
+  const pending = state.lottery.pendingBet;
+  if (!bar || !meta) return;
+  if (!pending || ltIsCumulative()) {
+    bar.style.display = 'none';
+    meta.innerHTML = '';
+    if (confirmBtn) confirmBtn.disabled = false;
+    return;
+  }
+  const stake = ltStake();
+  const odds = ltQuoteTicket(pending.type, pending.picks);
+  const profit = Math.round(stake * (odds - 1) * 100) / 100;
+  bar.style.display = '';
+  meta.innerHTML = escapeHtml(ltDisplayText(pending.label)) + ' · ' + escapeHtml(ltDisplayText(pending.desc || ''))
+    + '<br>' + ltOddsHtml(odds) + ' · 注 ' + stake + ' ' + LT_COIN_UNIT + ' · 可赢 <strong>' + ltFmtCoin(profit) + '</strong>'
+    + ' <span style="opacity:0.85">（确认时锁定赔率）</span>';
+  if (confirmBtn) confirmBtn.disabled = !!state.lottery.placingBet;
+}
+
+function ltQueueBet(ticket) {
+  ltEnsureState();
+  if (ltIsCumulative()) {
+    ltAddParlayLeg(ticket);
+    return;
+  }
+  state.lottery.pendingBet = { ...ticket };
+  ltRenderPendingConfirm();
+}
+
+async function ltAddParlayLeg(ticket) {
+  ltEnsureState();
+  if (typeof acRequireAuth === 'function' && acEnabled() && !(await acRequireAuth())) return;
+  state.lottery.parlayLegs.push(ltBuildLeg(ticket));
+  ltRenderParlay();
+  acScheduleSavePrefs?.();
+}
+
+async function ltExecutePendingBet() {
+  ltEnsureState();
+  const pending = state.lottery.pendingBet;
+  if (!pending || state.lottery.placingBet) return;
+  state.lottery.placingBet = true;
+  ltRenderPendingConfirm();
+  try {
+    await ltAddTicket(pending);
+    ltClearPendingBet();
+  } finally {
+    state.lottery.placingBet = false;
+    ltRenderPendingConfirm();
+  }
+}
+
 async function ltAddTicket(ticket) {
   ltEnsureState();
   if (ltIsCumulative()) {
-    if (typeof acRequireAuth === 'function' && acEnabled() && !(await acRequireAuth())) return;
-    state.lottery.parlayLegs.push(ltBuildLeg(ticket));
-    ltRenderParlay();
-    acScheduleSavePrefs?.();
+    await ltAddParlayLeg(ticket);
     return;
   }
   if (typeof acRequireAuth === 'function' && acEnabled()) {
@@ -794,14 +877,13 @@ async function ltAddTicket(ticket) {
       stake,
       odds,
     });
-    await acLoadLotteryFromServer();
     acScheduleSavePrefs?.();
     return;
   }
   ticket.id = state.lottery.nextId++;
   ticket.createdAt = Date.now();
-  ticket.stake = ltStake();
-  ticket.odds = ltQuoteTicket(ticket.type, ticket.picks);
+  ticket.stake = ticket.stake ?? ltStake();
+  ticket.odds = ticket.odds ?? ltQuoteTicket(ticket.type, ticket.picks);
   state.lottery.tickets.unshift(ticket);
   ltRenderSlip();
 }
@@ -825,7 +907,6 @@ async function ltConfirmParlay() {
     if (stake < 1) throw new Error('虚拟币不足');
     await acPlaceParlay(ticket);
     state.lottery.parlayLegs = [];
-    await acLoadLotteryFromServer();
     ltRenderParlay();
     acScheduleSavePrefs?.();
     return;
@@ -1028,9 +1109,11 @@ function ltUpdateBetModeUi() {
   const parlayPanel = document.getElementById('ltParlay');
   if (parlayPanel) parlayPanel.style.display = cumulative ? '' : 'none';
   document.querySelectorAll('.lt-bet-btn').forEach((btn) => {
-    btn.textContent = cumulative ? '加入串关' : '下注';
+    btn.textContent = cumulative ? '加入串关' : '选号';
   });
+  if (cumulative) ltClearPendingBet();
   ltRenderParlay();
+  ltRenderPendingConfirm();
 }
 
 function ltRenderSlip() {
@@ -1071,7 +1154,11 @@ function ltBindAdd(btnId, buildTicket) {
     try {
       const ticket = buildTicket();
       if (!ticket) return;
-      await ltAddTicket(ticket);
+      if (ltIsCumulative()) {
+        await ltAddTicket(ticket);
+        return;
+      }
+      ltQueueBet(ticket);
     } catch (err) {
       alert((typeof acErrorMessage === 'function' ? acErrorMessage(err) : null) || err.message || String(err));
     }
@@ -1212,6 +1299,7 @@ function ltWireMarketA() {
   syncChamp();
   syncOrder();
   syncAny();
+  return () => { syncChamp(); syncOrder(); syncAny(); };
 }
 
 function ltWireMarketB() {
@@ -1229,6 +1317,7 @@ function ltWireMarketB() {
     el?.addEventListener('input', sync);
   });
   sync();
+  return sync;
 }
 
 function ltWireMarketD() {
@@ -1246,6 +1335,7 @@ function ltWireMarketD() {
     document.getElementById(id)?.addEventListener('change', sync);
   });
   sync();
+  return sync;
 }
 
 function ltWireMarketH() {
@@ -1256,6 +1346,7 @@ function ltWireMarketH() {
   syncDark();
   syncUpset();
   ltFillTailDigitSelect();
+  return () => { syncDark(); syncUpset(); ltFillTailDigitSelect(); };
 }
 
 function ltWireMarketAdds() {
@@ -1400,11 +1491,11 @@ function ltWireLiveOddsA() {
   };
   syncOrder();
   syncAny();
+  const syncAll = () => { syncZh(); syncYf(); syncDouble(); syncOrder(); syncAny(); };
   ['ltA_zh', 'ltA_yf', 'ltA_dzh', 'ltA_dyf', 'ltA_pair_group', 'ltA_o1', 'ltA_o2', 'ltA_any_group', 'ltA_a1', 'ltA_a2'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('change', () => {
-      syncZh(); syncYf(); syncDouble(); syncOrder(); syncAny();
-    });
+    document.getElementById(id)?.addEventListener('change', syncAll);
   });
+  return syncAll;
 }
 
 function ltWireLiveOddsB() {
@@ -1445,6 +1536,7 @@ function ltWireLiveOddsB() {
     document.getElementById(id)?.addEventListener('change', syncAll);
     document.getElementById(id)?.addEventListener('input', syncAll);
   });
+  return syncAll;
 }
 
 function ltWireLiveOddsD() {
@@ -1471,9 +1563,11 @@ function ltWireLiveOddsD() {
     const half = document.getElementById('ltD_avg')?.value || '上半场';
     return ltBookOdds(ltProbAvgRankHalf(group, half));
   });
+  const syncAll = () => { syncChamp(); syncOu(); syncPeak(); syncAvg(); };
   ['ltD_ch_group', 'ltD_half', 'ltD_ou_group', 'ltD_ou', 'ltD_peak_group', 'ltD_peak', 'ltD_avg_group', 'ltD_avg'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('change', () => { syncChamp(); syncOu(); syncPeak(); syncAvg(); });
+    document.getElementById(id)?.addEventListener('change', syncAll);
   });
+  return syncAll;
 }
 
 function ltWireLiveOddsH() {
@@ -1499,6 +1593,14 @@ function ltWireLiveOddsH() {
   document.getElementById('ltH_upset')?.addEventListener('change', syncUpset);
   document.getElementById('ltH_digit')?.addEventListener('change', syncTail);
   syncTail();
+  return () => { syncDark(); syncUpset(); syncTail(); };
+}
+
+function ltRefreshMarketsLive() {
+  ltEnsureState();
+  state.lottery.refreshMarketData?.();
+  state.lottery.refreshOdds?.();
+  ltRenderPendingConfirm();
 }
 
 function ltRenderMarkets() {
@@ -1509,10 +1611,19 @@ function ltRenderMarkets() {
   document.querySelectorAll('.lt-cat-tab').forEach((btn) => btn.classList.toggle('active', btn.dataset.ltCat === cat));
   el.innerHTML = (cat === 'A' ? ltMarketsA() : cat === 'B' ? ltMarketsB() : cat === 'D' ? ltMarketsD() : ltMarketsH());
   ltWireMarketAdds();
-  if (cat === 'A') { ltWireMarketA(); ltWireLiveOddsA(); }
-  if (cat === 'B') { ltWireMarketB(); ltWireLiveOddsB(); }
-  if (cat === 'D') { ltWireMarketD(); ltWireLiveOddsD(); }
-  if (cat === 'H') { ltWireMarketH(); ltWireLiveOddsH(); }
+  if (cat === 'A') {
+    state.lottery.refreshMarketData = ltWireMarketA();
+    state.lottery.refreshOdds = ltWireLiveOddsA();
+  } else if (cat === 'B') {
+    state.lottery.refreshMarketData = ltWireMarketB();
+    state.lottery.refreshOdds = ltWireLiveOddsB();
+  } else if (cat === 'D') {
+    state.lottery.refreshMarketData = ltWireMarketD();
+    state.lottery.refreshOdds = ltWireLiveOddsD();
+  } else {
+    state.lottery.refreshMarketData = ltWireMarketH();
+    state.lottery.refreshOdds = ltWireLiveOddsH();
+  }
   document.querySelectorAll('[id^="ltAdd_"]').forEach((btn) => btn.classList.add('lt-bet-btn'));
   ltUpdateBetModeUi();
 }
@@ -1527,6 +1638,7 @@ function ltInitLotteryTab() {
     stakeEl.addEventListener('input', () => {
       state.lottery.defaultStake = ltStake();
       ltRenderParlay();
+      ltRenderPendingConfirm();
       acScheduleSavePrefs?.();
     });
   }
@@ -1542,6 +1654,10 @@ function ltInitLotteryTab() {
     ltUpdateBetModeUi();
     acScheduleSavePrefs?.();
   });
+  document.getElementById('ltPendingConfirmBtn')?.addEventListener('click', async () => {
+    try { await ltExecutePendingBet(); } catch (err) { alert((typeof acErrorMessage === 'function' ? acErrorMessage(err) : null) || err.message || String(err)); }
+  });
+  document.getElementById('ltPendingCancelBtn')?.addEventListener('click', () => ltClearPendingBet());
   document.getElementById('ltConfirmParlay')?.addEventListener('click', async () => {
     try { await ltConfirmParlay(); } catch (err) { alert((typeof acErrorMessage === 'function' ? acErrorMessage(err) : null) || err.message || String(err)); }
   });
@@ -1576,14 +1692,15 @@ function renderLottery() {
   ltInitLotteryTab();
   ltUpdateWalletCapDisplay();
   ltUpdateStakeLimits();
-  ltRenderMarkets();
-  ltUpdateBetModeUi();
-  if (typeof acEnabled === 'function' && acEnabled() && state.account?.user) {
-    acLoadLotteryFromServer().catch(() => {});
+  if (!window.__ltMarketsRendered) {
+    window.__ltMarketsRendered = true;
+    ltRenderMarkets();
   } else {
-    ltRenderSlip();
-    ltRenderJackpot();
+    ltRefreshMarketsLive();
   }
+  ltRenderSlip();
+  ltRenderJackpot();
+  ltRenderPendingConfirm();
 }
 `;
 }
