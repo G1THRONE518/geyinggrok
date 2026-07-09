@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "modelKey": "prelim-4814",
+  "rulesSource": "config/geying-s3-prelim-voting-rules.json",
+  "label": "prelim-4814: approval-vote proxy for contestant Top 30% (下半场)",
+  "seasonHalf": "下半场",
+  "seasonHalfKey": "second_half",
+  "rationale": {
+    "blend": "预赛互评是赞成票排名，不是决赛 词/曲/调 计分。下半场默认 45% 支持度 / 55% 转化率（与上半场 prelim-4814 一致）；指标权重仍为 prelim-4814。",
+    "views": "播放 18%：参赛者须听到作品才可能投赞成票。",
+    "favoritesAndCoins": "收藏 20%、投币 18%：最接近「愿意背书」的公开信号。",
+    "replies": "评论 14%/16%：讨论深度在下半场数据中仍有效。",
+    "shares": "分享 14%/12%。",
+    "danmaku": "弹幕 6%/6%。",
+    "sanlian": "与上半场相同：组内 log1p 三连 minmax + partial-sanlian 去相关系数（config/geying-s3-partial-sanlian-coeffs.json，自 locked 5050 恢复）。"
+  },
+  "finalBlend": {
+    "supportScore": 0.45,
+    "conversionScore": 0.55
+  },
+  "supportWeights": {
+    "views": 0.18,
+    "likes": 0.10,
+    "coins": 0.18,
+    "favorites": 0.20,
+    "shares": 0.14,
+    "replies": 0.14,
+    "danmaku": 0.06
+  },
+  "conversionWeights": {
+    "likes_rate": 0.14,
+    "coins_rate": 0.24,
+    "favorites_rate": 0.28,
+    "shares_rate": 0.12,
+    "replies_rate": 0.16,
+    "danmaku_rate": 0.06
+  },
+  "advanceCutoffs": {
+    "中文组": 29,
+    "外文组": 8
+  },
+  "defaultInput": "outputs/bilibili-geying-s3-second-half-partial-sanlian-5050-ps.csv",
+  "defaultLockedRankSource": "outputs/bilibili-geying-s3-second-half-partial-sanlian-5050-ps.csv",
+  "defaultOutput": {
+    "htmlPlayground": "outputs/bilibili-geying-s3-second-half-predicted-rankings-prelim-playground-v13-dark-ps5050.html"
+  }
+}

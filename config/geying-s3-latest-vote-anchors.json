@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "description": "Latest disclosed vote-anchor scenario, provided after the original top-anchored prediction.",
+  "rankingSource": "outputs/bilibili-geying-s3-predicted-rankings-votes-topanchored.csv",
+  "defaultOutput": "outputs/bilibili-geying-s3-predicted-rankings-latest-anchors.csv",
+  "groups": {
+    "YC": {
+      "label": "\u4e2d\u6587\u7ec4",
+      "topRank": 1,
+      "topVotes": 26,
+      "advanceCount": 26,
+      "lineBandStartRank": 26,
+      "lineBandEndRank": 30,
+      "lineVotes": 16
+    },
+    "YF": {
+      "label": "\u5916\u6587\u7ec4",
+      "topRank": 1,
+      "topVotes": 20,
+      "advanceCount": 10,
+      "lineBandStartRank": 9,
+      "lineBandEndRank": 10,
+      "lineVotes": 15
+    }
+  }
+}

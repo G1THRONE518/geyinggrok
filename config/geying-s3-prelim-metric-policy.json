@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "modelKey": "prelim-4814",
+  "previousModelKey": "prelim-4555",
+  "rulesSource": "config/geying-s3-prelim-voting-rules.json",
+  "label": "prelim-4814: approval-vote proxy for contestant Top 30%",
+  "rationale": {
+    "blend": "Prelim contestant voting is approval-ballot ranking, not final 词/曲/调 scoring. Salience matters because each team distributes roughly half its field worth of picks, but each work still needs strong backing once heard. Use 45% raw support / 55% conversion.",
+    "views": "Raised to 18% for ballot salience (contestants must hear a work to approve it). Still below leaked Bilibili play coef influence because we min-max normalize counts.",
+    "favoritesAndCoins": "Closest public proxies for costly approval intent; favorite 20%, coin 18%.",
+    "replies": "Comments proxy discussion depth; 14% support / 16% conversion. Strong signal in S3 data (avg 2.9% reply rate vs 0.056% danmaku).",
+    "shares": "Raised toward leaked Bilibili share weight (0.6 coef); 14% support / 12% conversion.",
+    "danmaku": "Cut to 6% support / 6% conversion. Leaked Bilibili weights danmaku ~14.5%, but 84% of S3 entries have zero danmaku (median 0, max 4).",
+    "sanlian": "Keep locked partial-sanlian adjusted like/coin/favorite fields; weight favorite > coin > like.",
+    "sources": [
+      "https://www.meihua.info/article/4395790150861824",
+      "https://www.cnblogs.com/szdytom/p/19831471/bilibili-ugc-anal",
+      "https://www.bilibili.com/opus/1202501507562340374"
+    ]
+  },
+  "finalBlend": {
+    "supportScore": 0.45,
+    "conversionScore": 0.55
+  },
+  "supportWeights": {
+    "views": 0.18,
+    "likes": 0.10,
+    "coins": 0.18,
+    "favorites": 0.20,
+    "shares": 0.14,
+    "replies": 0.14,
+    "danmaku": 0.06
+  },
+  "conversionWeights": {
+    "likes_rate": 0.14,
+    "coins_rate": 0.24,
+    "favorites_rate": 0.28,
+    "shares_rate": 0.12,
+    "replies_rate": 0.16,
+    "danmaku_rate": 0.06
+  },
+  "advanceCutoffs": {
+    "中文组": 26,
+    "外文组": 10
+  },
+  "defaultInput": "outputs/bilibili-geying-s3-predicted-rankings-partial-sanlian-5050.csv",
+  "defaultLockedRankSource": "outputs/bilibili-geying-s3-predicted-rankings-partial-sanlian-5050.csv",
+  "defaultOutput": {
+    "csv": "outputs/bilibili-geying-s3-predicted-rankings-prelim-4814.csv",
+    "html": "outputs/bilibili-geying-s3-predicted-rankings-prelim-4814.html",
+    "htmlVisual": "outputs/bilibili-geying-s3-predicted-rankings-prelim-4814-visual.html",
+    "htmlPlayground": "outputs/bilibili-geying-s3-predicted-rankings-prelim-playground-v7.html"
+  },
+  "outputNotes": {
+    "html": "Frozen table report — not overwritten by the ranking script unless you pass --html explicitly.",
+    "htmlVisual": "Default visual/dashboard report written on each script run.",
+    "htmlPlayground": "Interactive weight playground — separate script; does not overwrite other HTML outputs."
+  }
+}

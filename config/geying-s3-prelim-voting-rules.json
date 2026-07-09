@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "source": "https://www.bilibili.com/opus/1202501507562340374",
+  "sourceVideo": "https://www.bilibili.com/video/BV1ZoL66nEAY",
+  "season": "S3",
+  "phase": "prelim",
+  "summary": "S3 prelim uses simplified approval-style contestant voting plus a separate Bilibili audience ballot and judge grades. It does NOT use final-round 词/曲/调 dimensional peer review.",
+  "structure": {
+    "halves": ["预赛上半场", "预赛下半场"],
+    "groups": {
+      "YC": { "label": "中文组", "codePrefix": "YC" },
+      "YF": { "label": "外文组", "codePrefix": "YF" }
+    },
+    "scoringInPrelim": false,
+    "finalScoreFormulaAppliesIn": "final_only"
+  },
+  "advancePaths": {
+    "anyOneRequired": true,
+    "paths": [
+      {
+        "key": "contestant_approval",
+        "label": "参赛者互评",
+        "rule": "Rank within same half and group at or above Top 30%"
+      },
+      {
+        "key": "audience_ballot",
+        "label": "B站观众投票",
+        "rule": "Rank within same half and group at or above Top 8%"
+      },
+      {
+        "key": "judge_grade",
+        "label": "评委评价",
+        "rule": "Prelim judge overall grade A+ or S"
+      }
+    ]
+  },
+  "contestantApprovalVote": {
+    "ticketType": "普通票",
+    "dimensions": "none_in_prelim",
+    "tripleVote": false,
+    "ballotFormula": "floor(group_entry_count * 0.5), minimum 1",
+    "examples": {
+      "YC_first_half": {
+        "entryCount": 88,
+        "ballotPerTeam": 44
+      },
+      "YF_first_half": {
+        "entryCount": 34,
+        "ballotPerTeam": 17
+      },
+      "YC_second_half": {
+        "entryCount": 99,
+        "ballotPerTeam": 49
+      },
+      "YF_second_half": {
+        "entryCount": 28,
+        "ballotPerTeam": 14
+      }
+    },
+    "constraints": [
+      "Vote only within the same half and same group",
+      "Each team may approve each work at most once",
+      "Teams may approve their own work",
+      "Same composer counts as one team for ballot purposes",
+      "Ranking is by total approval count"
+    ],
+    "notPresentInPrelim": ["词", "曲", "调", "三倍票"]
+  },
+  "audienceBallot": {
+    "channel": "Bilibili official voting column/page on VOCALOID吧 account",
+    "maxVotesPerPersonPerWork": 1,
+    "maxVotesPerPersonTotal": "unlimited across different works",
+    "rankingScope": "within same half and group",
+    "note": "This is not the same as public video likes/coins/favorites; it is a dedicated prelim ballot."
+  },
+  "finalRoundContrast": {
+    "peerReviewDimensions": ["词", "曲", "调"],
+    "tripleVoteSharePerDimension": 0.1,
+    "normalVoteSharePerDimension": 0.35,
+    "dimensionPeerScoreFormula": "sqrt(dimension_votes / group_max_dimension_votes) * 100",
+    "peerReviewBlendFormula": "a*0.45 + b*0.30 + c*0.25",
+    "dimensionScoreFormula": "a*0.45 + b*0.30 + c*0.25",
+    "finalScoreFormula": "peer_review_score * (1 + bilibili_vote_weight_up_to_0.20) * (1 - penalty_weight)"
+  },
+  "metricModelIntent": {
+    "target": "Proxy contestant approval ranking for Top 30% bubble modeling",
+    "currentModelKey": "prelim-4814",
+    "notTarget": [
+      "Final 词/曲/调 peer review",
+      "Official audience ballot exact counts",
+      "Judge A+/S lane"
+    ],
+    "policyFile": "config/geying-s3-prelim-metric-policy.json",
+    "rankingScript": "scripts/build_s3_ranking_prelim.mjs"
+  }
+}

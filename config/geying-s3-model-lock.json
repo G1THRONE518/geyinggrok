@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "purpose": "Lock the exact confirmed Geying S3 prediction pipeline used for the final vote-anchored ranking.",
+  "scoreSource": "outputs/bilibili-geying-s3-predicted-rankings-partial-sanlian-5050.csv",
+  "referenceOutput": "outputs/bilibili-geying-s3-predicted-rankings-votes-topanchored.csv",
+  "defaultOutput": "outputs/bilibili-geying-s3-predicted-rankings-votes-topanchored-rebuilt.csv",
+  "scorePolicy": {
+    "mode": "read_confirmed_scores_from_scoreSource",
+    "modelScoreColumn": "prediction_score",
+    "supportScoreColumn": "support_score",
+    "conversionScoreColumn": "conversion_score",
+    "rawSupportWeight": 0.5,
+    "engagementConversionWeight": 0.5,
+    "coinWeight": "normal",
+    "partialCorrelation": true,
+    "sanlianDeoverlap": true,
+    "note": "The confirmed score-generation script was temporary and is not present in the workspace. This lock preserves the authoritative score table that produced the final ranking."
+  },
+  "voteAnchorPolicy": {
+    "mode": "read_confirmed_vote_anchors_from_referenceOutput",
+    "note": "The final vote columns are preserved from referenceOutput because the disclosed top-two and cutoff-cluster constraints were applied as discrete anchors, not a smooth formula."
+  },
+  "groups": {
+    "YC": {
+      "label": "\u4e2d\u6587\u7ec4",
+      "disclosedDenominator": 44,
+      "topVotes": 26,
+      "advanceLineVotes": 16,
+      "advanceCount": 26,
+      "turnoutGrowthCentral": 0.1,
+      "turnoutGrowthHigh": 0.2
+    },
+    "YF": {
+      "label": "\u5916\u6587\u7ec4",
+      "disclosedDenominator": 26,
+      "topVotes": 20,
+      "advanceLineVotes": 12,
+      "advanceCount": 10,
+      "turnoutGrowthCentral": 0.1,
+      "turnoutGrowthHigh": 0.2
+    }
+  }
+}

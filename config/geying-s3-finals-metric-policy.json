@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "rulesSource": "config/geying-s3-prelim-voting-rules.json",
+  "label": "S3 决赛官方计分代理（词/曲/调 sqrt + B站加权）",
+  "qualifiedSource": "config/geying-s3-prelim-confirmed-qualifiers.json",
+  "statsInput": "outputs/bilibili-geying-s3-qualified-video-stats-latest.csv",
+  "dimensionScoreFormula": "sqrt(dimension_votes / group_max_dimension_votes) * 100",
+  "peerReviewBlend": { "top": 0.45, "mid": 0.30, "low": 0.25 },
+  "tripleVoteShare": 0.10,
+  "normalVoteShare": 0.35,
+  "tripleVoteMultiplier": 3,
+  "bilibiliMaxWeight": 0.20,
+  "bilibiliWeightMode": "sqrt",
+  "penaltyWeightAssumed": 0,
+  "ageCalibration": {
+    "enabled": true,
+    "mode": "second_half_median_per_group",
+    "exponent": 0.65,
+    "strength": 0.5,
+    "minScale": 0.65,
+    "maxScale": 1.1,
+    "minDaysOnline": 5,
+    "maxDaysOnline": 90,
+    "note": "age_scale = 1 - strength×(1 - (reference_days/days_online)^exponent). strength 0.5 softens correction; 上半场 ~0.81 instead of ~0.54."
+  },
+  "dimensionProxies": {
+    "词": {
+      "label": "词",
+      "weights": { "replies": 0.28, "shares": 0.22, "favorites": 0.22, "coins": 0.18, "likes": 0.10 }
+    },
+    "曲": {
+      "label": "曲",
+      "weights": { "coins": 0.30, "favorites": 0.28, "shares": 0.18, "likes": 0.14, "replies": 0.10 }
+    },
+    "调": {
+      "label": "调",
+      "weights": { "likes": 0.32, "views": 0.22, "coins": 0.18, "danmaku": 0.14, "favorites": 0.14 }
+    }
+  },
+  "audienceProxy": {
+    "support": { "views": 0.16, "likes": 0.10, "coins": 0.18, "favorites": 0.20, "shares": 0.14, "replies": 0.14, "danmaku": 0.08 },
+    "conversion": { "likes_rate": 0.14, "coins_rate": 0.24, "favorites_rate": 0.28, "shares_rate": 0.12, "replies_rate": 0.16, "danmaku_rate": 0.06 },
+    "blend": { "supportScore": 0.40, "conversionScore": 0.60 }
+  },
+  "notes": [
+    "Official: 作品单维度互评得分 = sqrt(作品单维度互评票数 / 小组内该维度最高互评票数) × 100",
+    "Official: 作品互评分 = a×45% + b×30% + c×25% (a,b,c = three dimension scores sorted desc)",
+    "Official: 决赛分数 = 互评分 × (1 + B站加权≤20%) × (1 - 惩罚权重)；本页惩罚权重默认 0",
+    "Dimension votes are proxied from current Bilibili stats; triple/normal split follows 10%/35% rule on proxy ballot units",
+    "Age calibration scales raw counts to second-half median exposure (~13d) before scoring so 上半场 (~27d) cumulative inflation is reduced"
+  ]
+}

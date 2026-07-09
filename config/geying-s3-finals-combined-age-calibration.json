@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "label": "合并决赛归一化 · 上半场上架时长校准",
+  "enabled": true,
+  "mode": "second_half_median_per_group",
+  "exponent": 0.65,
+  "strength": 0.5,
+  "minScale": 0.75,
+  "maxScale": 1.05,
+  "fallbackDaysOnline": { "first_half": 27, "second_half": 13 },
+  "note": "Only applied when 合并决赛归一化 is active. strength 0.5 with ~27d vs ~13d ref gives 上半场 ~×0.81."
+}

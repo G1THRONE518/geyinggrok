@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "build:finals": "bun scripts/build_s3_finals_from_prelim_template.mjs",
+    "build:netlify": "bun scripts/build_s3_finals_from_prelim_template.mjs && bun scripts/finalize_netlify_dist.mjs",
+    "dev:netlify": "bunx netlify dev",
+    "deploy:netlify": "bun run build:netlify && bunx netlify deploy --prod --dir=dist",
+    "deploy:netlify:draft": "bun run build:netlify && bunx netlify deploy --dir=dist"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "netlify-cli": "^26.2.0",
+    "puppeteer-core": "^25.2.0"
+  }
+}
