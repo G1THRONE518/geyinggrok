@@ -4,29 +4,19 @@ import crypto from "node:crypto";
 const INITIAL_COINS = Number(process.env.ACCOUNT_INITIAL_COINS) || 100;
 const MAX_STAKE = Number(process.env.ACCOUNT_MAX_STAKE) || 100;
 const RATE_LIMIT = Number(process.env.ACCOUNT_RATE_LIMIT_PER_MIN) || 10;
+const DEVICE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function clientIp(request, context) {
-  return (
-    context.ip
-    || request.headers.get("x-nf-client-connection-ip")
-    || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    || "unknown"
-  );
+function resolveDeviceId(request) {
+  return request.headers.get("x-device-id")?.trim() || "";
 }
 
-function walletKey(ip) {
-  return crypto.createHash("sha256").update(`wallet:v1:${ip}`).digest("hex");
+function walletKey(deviceId) {
+  return crypto.createHash("sha256").update(`wallet:v2:device:${deviceId}`).digest("hex");
 }
 
-function maskIp(ip) {
-  if (!ip || ip === "unknown") return "本机";
-  if (ip.includes(":")) {
-    const parts = ip.split(":");
-    return parts.slice(0, 3).join(":") + ":…";
-  }
-  const parts = ip.split(".");
-  if (parts.length === 4) return `${parts[0]}.${parts[1]}.x.x`;
-  return ip;
+function maskDeviceId(deviceId) {
+  if (!deviceId) return "未知设备";
+  return deviceId.replace(/-/g, "").slice(0, 8) + "…";
 }
 
 function jsonResponse(body, status = 200) {
@@ -91,13 +81,17 @@ export default async (request, context) => {
       status: 204,
       headers: {
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers": "Content-Type, X-Device-Id",
       },
     });
   }
 
-  const ip = clientIp(request, context);
-  const key = walletKey(ip);
+  const deviceId = resolveDeviceId(request);
+  if (!DEVICE_ID_RE.test(deviceId)) {
+    return jsonResponse({ error: "invalid_device_id" }, 400);
+  }
+
+  const key = walletKey(deviceId);
   const store = getStore("geying-wallets");
 
   try {
@@ -106,7 +100,7 @@ export default async (request, context) => {
       return jsonResponse({
         coins: wallet.coins,
         cap: INITIAL_COINS,
-        ipLabel: maskIp(ip),
+        deviceLabel: maskDeviceId(deviceId),
         tickets: (wallet.tickets || []).slice(0, 200),
         prefs: wallet.prefs || {},
       });

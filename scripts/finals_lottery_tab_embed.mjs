@@ -111,7 +111,7 @@ export function lotteryTabHtml() {
   return `<section class="main-view" id="view-lottery">
       <div class="lt-panel">
         <div class="lt-banner">
-          <strong>福利彩票 · 庄家模拟盘</strong> · 赔率由左侧<strong>组内胜率</strong>等模型推导并含约 <strong>6% 水位</strong>，随滑块实时变动；<strong>下注时锁定赔率</strong>。<strong>累积串关</strong>多关相乘。每个 IP 钱包 <strong id="ltCoinCapNote">◈100 / 100</strong> 虚拟币额度，下注扣币、注单云端保存。非官方、非真钱。
+          <strong>福利彩票 · 庄家模拟盘</strong> · 赔率由左侧<strong>组内胜率</strong>等模型推导并含约 <strong>6% 水位</strong>，随滑块实时变动；<strong>下注时锁定赔率</strong>。<strong>累积串关</strong>多关相乘。每台设备钱包 <strong id="ltCoinCapNote">◈100 / 100</strong> 虚拟币额度，下注扣币、注单云端保存。非官方、非真钱。
         </div>
         <div class="lt-cat-tabs" id="ltCatTabs">
           <button type="button" class="lt-cat-tab active" data-lt-cat="A">A · 冠军盘</button>

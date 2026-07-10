@@ -32,7 +32,7 @@ export function authAccountHtml() {
         <span class="ac-balance" id="acBalance">◈ — / 100</span>
         <span class="ac-balance-cap" id="acBalanceCap">账户上限 ◈100</span>
       </span>
-      <span class="ac-user" id="acUser">按 IP 识别钱包</span>
+      <span class="ac-user" id="acUser">按本机设备识别钱包</span>
       <button type="button" class="ac-btn" id="acRefreshBtn">刷新钱包</button>
     </div>
     <div class="ac-offline-note" id="acOfflineNote" style="display:none">钱包 API 未连接（请通过 Netlify 部署访问，或运行 netlify dev）</div>`;
@@ -48,10 +48,49 @@ function acWalletUrl() {
   return DATA.walletApiUrl || '/api/wallet';
 }
 
+const AC_DEVICE_KEY = 'geying-wallet-device-v1';
+
 function acEnsureAccountState() {
   if (!state.account) {
-    state.account = { coins: null, ready: false, ipLabel: '', error: null, active: false };
+    state.account = { coins: null, ready: false, deviceLabel: '', error: null, active: false };
   }
+}
+
+function acIsDeviceId(id) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(id || ''));
+}
+
+function acFallbackUuid() {
+  const hex = () => Math.floor(Math.random() * 16).toString(16);
+  const seg = (n) => Array.from({ length: n }, hex).join('');
+  return seg(8) + '-' + seg(4) + '-4' + seg(3) + '-' + ['8', '9', 'a', 'b'][Math.floor(Math.random() * 4)] + seg(3) + '-' + seg(12);
+}
+
+function acDeviceId() {
+  try {
+    let id = localStorage.getItem(AC_DEVICE_KEY);
+    if (acIsDeviceId(id)) return id;
+    id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : acFallbackUuid();
+    localStorage.setItem(AC_DEVICE_KEY, id);
+    return id;
+  } catch (e) {
+    try {
+      let id = sessionStorage.getItem(AC_DEVICE_KEY);
+      if (acIsDeviceId(id)) return id;
+      id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : acFallbackUuid();
+      sessionStorage.setItem(AC_DEVICE_KEY, id);
+      return id;
+    } catch (e2) {
+      if (!state._acDeviceId) state._acDeviceId = acFallbackUuid();
+      return state._acDeviceId;
+    }
+  }
+}
+
+function acApiHeaders(withJson) {
+  const headers = { 'X-Device-Id': acDeviceId() };
+  if (withJson) headers['Content-Type'] = 'application/json';
+  return headers;
 }
 
 function acCoinCap() {
@@ -79,13 +118,14 @@ function acErrorMessage(err) {
   if (code.includes('invalid_parlay')) return '串关至少需要 2 关';
   if (code.includes('Failed to fetch') || code.includes('NetworkError')) return '钱包 API 连接失败，请确认已部署到 Netlify';
   if (code.includes('wallet_busy')) return '钱包繁忙，请稍后再试';
+  if (code.includes('invalid_device_id')) return '本机设备标识无效，请刷新页面重试';
   return code || '操作失败';
 }
 
 async function acApi(method, body) {
   const res = await fetch(acWalletUrl(), {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: acApiHeaders(!!body),
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -126,13 +166,13 @@ function acRenderBar() {
   if (offline) offline.style.display = state.account.error ? '' : 'none';
 
   if (state.account.active) {
-    if (userEl) userEl.textContent = 'IP 钱包 · ' + (state.account.ipLabel || '已连接');
+    if (userEl) userEl.textContent = '本机钱包 · ' + (state.account.deviceLabel || '已连接');
     if (balanceEl) balanceEl.textContent = acFmtCoins(state.account.coins);
   } else if (state.account.error) {
     if (userEl) userEl.textContent = '钱包连接失败';
     if (balanceEl) balanceEl.textContent = '◈ — / ' + acCoinCap();
   } else {
-    if (userEl) userEl.textContent = '正在连接 IP 钱包…';
+    if (userEl) userEl.textContent = '正在连接本机钱包…';
     if (balanceEl) balanceEl.textContent = '◈ … / ' + acCoinCap();
   }
 }
@@ -157,7 +197,7 @@ function acApplyWalletPayload(data) {
   acEnsureAccountState();
   state.account.active = true;
   state.account.error = null;
-  state.account.ipLabel = data.ipLabel || '';
+  state.account.deviceLabel = data.deviceLabel || '';
   acSetBalance(data.coins);
   ltEnsureState();
   const rows = data.tickets || [];
