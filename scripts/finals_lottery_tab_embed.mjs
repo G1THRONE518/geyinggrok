@@ -111,7 +111,7 @@ export function lotteryTabHtml() {
   return `<section class="main-view" id="view-lottery">
       <div class="lt-panel">
         <div class="lt-banner">
-          <strong>福利彩票 · 庄家模拟盘</strong> · 赔率由左侧<strong>组内胜率</strong>等模型推导并含约 <strong>6% 水位</strong>，随滑块实时变动；<strong>下注时锁定赔率</strong>。<strong>累积串关</strong>多关相乘。每台设备钱包 <strong id="ltCoinCapNote">◈100 / 100</strong> 虚拟币额度，下注扣币、注单云端保存。非官方、非真钱。
+          <strong>福利彩票 · 庄家模拟盘</strong> · 赔率锁定 <strong>prelim-4814 · 45/55</strong> 半场归一模型（含约 <strong>6% 水位</strong>），<strong>不随左侧滑块变动</strong>；<strong>下注时锁定赔率</strong>。<strong>累积串关</strong>多关相乘。每台设备钱包 <strong id="ltCoinCapNote">◈100 / 100</strong> 虚拟币额度，下注扣币、注单云端保存。非官方、非真钱。
         </div>
         <div class="lt-cat-tabs" id="ltCatTabs">
           <button type="button" class="lt-cat-tab active" data-lt-cat="A">A · 冠军盘</button>
@@ -167,6 +167,47 @@ const LT_VIG = 0.06;
 const LT_ODDS_MAX = 5000;
 const LT_COIN_SYM = '◈';
 const LT_COIN_UNIT = '币';
+const LT_ODDS_NORM_MODE = 'per-half';
+let ltOddsSnapshotCache = null;
+
+function ltClearOddsMcCaches() {
+  ltEnsureState();
+  state.lottery.topNCache = null;
+  state.lottery.fullRankCache = null;
+  state.lottery.kenoCache = null;
+}
+
+function ltBuildOddsSnapshot() {
+  if (ltOddsSnapshotCache) return ltOddsSnapshotCache;
+  const w = (typeof finalsDefaultWeights === 'function' ? finalsDefaultWeights(DATA) : DATA.defaultWeights) || {};
+  const saved = {
+    blend: state.blend,
+    support: state.support,
+    conversion: state.conversion,
+    supportPoints: state.supportPoints,
+    conversionPoints: state.conversionPoints,
+    normMode: state.normMode,
+  };
+  state.blend = { ...(w.blend || { supportScore: 0.45, conversionScore: 0.55 }) };
+  state.support = { ...(w.support || {}) };
+  state.conversion = { ...(w.conversion || {}) };
+  if (typeof pointsFromWeights === 'function' && typeof SUPPORT_KEYS !== 'undefined' && typeof CONVERSION_KEYS !== 'undefined') {
+    state.supportPoints = pointsFromWeights(w.support, SUPPORT_KEYS);
+    state.conversionPoints = pointsFromWeights(w.conversion, CONVERSION_KEYS);
+  }
+  state.normMode = LT_ODDS_NORM_MODE;
+  ltClearOddsMcCaches();
+  const cloneRows = (rows) => rows.map((row) => ({
+    ...row,
+    entry: { ...row.entry },
+  }));
+  ltOddsSnapshotCache = {
+    '中文组': cloneRows(scoreGroupRows('中文组')),
+    '外文组': cloneRows(scoreGroupRows('外文组')),
+  };
+  Object.assign(state, saved);
+  return ltOddsSnapshotCache;
+}
 
 function ltFmtCoin(amount) {
   return LT_COIN_SYM + ' ' + (Number(amount) || 0).toFixed(2);
@@ -851,7 +892,7 @@ function ltWireLiveOdds(ids, quoteFn) {
 }
 
 function ltRanked(group) {
-  return scoreGroupRows(group);
+  return ltBuildOddsSnapshot()[group] || [];
 }
 
 function ltChampion(group) {
@@ -1299,7 +1340,7 @@ function ltMarketsA() {
     + '<div class="lt-card"><h4>中文组冠军</h4><p>精确猜中文组 #1（60 选 1）</p><div class="lt-form">' + ltSelectShell('ltA_zh', true) + '<span id="ltOdds_A_zh" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_A_zh">下注</button></div></div>'
     + '<div class="lt-card"><h4>外文组冠军</h4><p>精确猜外文组 #1（25 选 1）</p><div class="lt-form">' + ltSelectShell('ltA_yf', true) + '<span id="ltOdds_A_yf" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_A_yf">下注</button></div></div>'
     + '<div class="lt-card"><h4>双冠串关</h4><p>中文冠 + 外文冠同时猜中（串关赔率相乘）</p><div class="lt-form">' + ltSelectShell('ltA_dzh', true) + ltSelectShell('ltA_dyf', true) + '<span id="ltOdds_A_double" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_A_double">下注</button></div></div>'
-    + '<div class="lt-card"><h4>冠亚军直选</h4><p>组内 #1、#2 顺序全对。赔率跟左侧<strong>综合分排名</strong>（支持/转化滑块）走，不是 Codex 锁定位。</p><div class="lt-form">' + groupSel + pairSel + '<span id="ltOdds_A_order" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_A_order">下注</button></div><span id="ltOdds_A_order_hint" class="lt-odds-hint"></span></div>'
+    + '<div class="lt-card"><h4>冠亚军直选</h4><p>组内 #1、#2 顺序全对。赔率锁定 <strong>45/55</strong> 半场归一综合排名，不随滑块变动。</p><div class="lt-form">' + groupSel + pairSel + '<span id="ltOdds_A_order" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_A_order">下注</button></div><span id="ltOdds_A_order_hint" class="lt-odds-hint"></span></div>'
     + '<div class="lt-card"><h4>冠亚军任序</h4><p>组内前两名的两首，顺序不限（两种顺序概率相加）</p><div class="lt-form">' + groupSel.replace('ltA_pair_group', 'ltA_any_group') + anySel + '<span id="ltOdds_A_any" class="lt-odds muted"><span class="tag">赔率</span>@—</span><button class="lt-btn primary" id="ltAdd_A_any">下注</button></div><span id="ltOdds_A_any_hint" class="lt-odds-hint"></span></div>';
 }
 
@@ -1901,8 +1942,6 @@ function renderLottery() {
   if (!window.__ltMarketsRendered) {
     window.__ltMarketsRendered = true;
     ltRenderMarkets();
-  } else {
-    ltRefreshMarketsLive();
   }
   ltRenderSlip();
   ltRenderJackpot();
